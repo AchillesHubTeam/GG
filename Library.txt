@@ -1,10 +1,38 @@
 local Library = {}
-local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
+
+-- [ EXECUTOR SAFE UTILITIES ] --
+local function GetSafeParent()
+    local success, hui = pcall(function() return gethui() end)
+    if success and hui then return hui end
+    local success2, core = pcall(function() return game:GetService("CoreGui") end)
+    if success2 and core then return core end
+    return LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local function GetGlobalEnv()
+    local success, env = pcall(function() return getgenv() end)
+    return success and env or _G
+end
+
+local GlobalEnv = GetGlobalEnv()
+
+local function SafeCallback(callback, ...)
+    if not callback then return end
+    local args = {...}
+    task.spawn(function()
+        local success, err = pcall(function()
+            callback(unpack(args))
+        end)
+        if not success then
+            warn("[UI Library Error in Callback]:", err)
+        end
+    end)
+end
 
 local UI_Elements = {
     AnimatedGradients = {},
@@ -134,10 +162,10 @@ local Themes = {
 local function Create(className, properties, children)
     local inst = Instance.new(className)
     for k, v in pairs(properties or {}) do
-        inst[k] = v
+        pcall(function() inst[k] = v end)
     end
     for _, child in ipairs(children or {}) do
-        child.Parent = inst
+        pcall(function() child.Parent = inst end)
     end
     return inst
 end
@@ -153,8 +181,8 @@ function Library:SendNotification(titleText, descText)
     local g2 = Create("ScreenGui", {
         Name = "UI_Cloud_Notification_" .. math.random(100, 999),
         ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-        Parent = (RunService:IsStudio() and LocalPlayer:WaitForChild("PlayerGui")) or CoreGui
     })
+    pcall(function() g2.Parent = GetSafeParent() end)
     
     local m2 = Create("Frame", {
         Name = "Main",
@@ -218,12 +246,14 @@ function Library:SendNotification(titleText, descText)
     local r2 = 0
     local renderSteppedConn
     renderSteppedConn = RunService.RenderStepped:Connect(function()
-        r2 = (r2 + 1.5) % 360
-        u2.UIGradient.Rotation = r2
-        for _, grad in ipairs(statusGradients) do
-            grad.Rotation = r2
-        end
-        m2.UIGradient.Offset = Vector2.new(math.sin(tick() * 1.5) * 0.3, 0)
+        pcall(function()
+            r2 = (r2 + 1.5) % 360
+            u2.UIGradient.Rotation = r2
+            for _, grad in ipairs(statusGradients) do
+                grad.Rotation = r2
+            end
+            m2.UIGradient.Offset = Vector2.new(math.sin(tick() * 1.5) * 0.3, 0)
+        end)
     end)
     
     for i, notif in ipairs(Notifications) do
@@ -238,7 +268,7 @@ function Library:SendNotification(titleText, descText)
         local oldNotif = table.remove(Notifications, 6)
         if oldNotif then
             Tween(oldNotif, {Position = UDim2.new(1, 300, 1, oldNotif.Position.Y.Offset)})
-            task.delay(0.3, function() oldNotif.Parent:Destroy() end)
+            task.delay(0.3, function() pcall(function() oldNotif.Parent:Destroy() end) end)
         end
     end
     
@@ -254,7 +284,7 @@ function Library:SendNotification(titleText, descText)
         local hideTween = Tween(m2, {Position = UDim2.new(1, 300, 1, m2.Position.Y.Offset)}, 0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
         hideTween.Completed:Connect(function()
             if renderSteppedConn then renderSteppedConn:Disconnect() end
-            g2:Destroy()
+            pcall(function() g2:Destroy() end)
             for i, notif in ipairs(Notifications) do
                 if notif and notif.Parent then
                     local newY = -20 - ((i - 1) * 90)
@@ -270,18 +300,18 @@ function Library:CreateWindow(config)
     config = config or {}
     local windowTitle = config.Title or "Hub Premium"
     
-    if getgenv().MainUI_Library then
-        pcall(function() getgenv().MainUI_Library:Destroy() end)
-        getgenv().MainUI_Library = nil
+    if GlobalEnv.MainUI_Library then
+        pcall(function() GlobalEnv.MainUI_Library:Destroy() end)
+        GlobalEnv.MainUI_Library = nil
     end
     
     local g = Create("ScreenGui", {
         Name = "Hub_Premium_" .. math.random(100, 999),
         ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-        ResetOnSpawn = false,
-        Parent = (RunService:IsStudio() and LocalPlayer:WaitForChild("PlayerGui")) or CoreGui
+        ResetOnSpawn = false
     })
-    getgenv().MainUI_Library = g
+    pcall(function() g.Parent = GetSafeParent() end)
+    GlobalEnv.MainUI_Library = g
     
     local m = Create("Frame", {
         Name = "MainFrame",
@@ -334,7 +364,7 @@ function Library:CreateWindow(config)
                 Rotation = math.random(-180, 180)
             }, fallSpeed, Enum.EasingStyle.Linear)
             
-            tween.Completed:Connect(function() flake:Destroy() end)
+            tween.Completed:Connect(function() pcall(function() flake:Destroy() end) end)
         end
     end)
     
@@ -885,7 +915,7 @@ function Library:CreateWindow(config)
                     isDropped = false
                     Tween(container, {Size = UDim2.new(1, -4, 0, 46)})
                     Tween(arrow, {Rotation = 0})
-                    if callback then callback(opt) end
+                    SafeCallback(callback, opt)
                     Library:SendNotification("Selected Mode", opt)
                 end)
             end
@@ -1101,7 +1131,7 @@ function Library:CreateWindow(config)
                     end
                     UpdateVisuals()
                     UpdateButtonText()
-                    if callback then callback(selectedItems) end
+                    SafeCallback(callback, selectedItems)
                 end)
             end
             
@@ -1174,7 +1204,7 @@ function Library:CreateWindow(config)
             end)
             
             btn.MouseButton1Click:Connect(function()
-                if callback then callback() end
+                SafeCallback(callback)
                 Library:SendNotification("Button Clicked", text)
             end)
         end
@@ -1261,7 +1291,7 @@ function Library:CreateWindow(config)
                 Tween(toggleFrame, {BackgroundColor3 = active and Themes[CurrentTheme].ToggleActive or Color3.fromRGB(150, 150, 150)}, 0.2)
                 Tween(ball, {Position = active and UDim2.new(1, -18, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)}, 0.2)
                 
-                if callback then callback(active) end
+                SafeCallback(callback, active)
                 local status = active and "Enabled" or "Disabled"
                 Library:SendNotification("Switch Toggled", text .. ": " .. status)
             end)
@@ -1384,7 +1414,7 @@ function Library:CreateWindow(config)
                 
                 sliderFill.Size = UDim2.new(pos, 0, 1, 0)
                 inputField.Text = tostring(value)
-                if callback then callback(value) end
+                SafeCallback(callback, value)
             end
             
             local dragging = false
@@ -1405,7 +1435,7 @@ function Library:CreateWindow(config)
                 
                 inputField.Text = tostring(val)
                 Tween(sliderFill, {Size = UDim2.new((val - min) / (max - min), 0, 1, 0)}, 0.2)
-                if callback then callback(val) end
+                SafeCallback(callback, val)
             end)
         end
         
@@ -1456,25 +1486,27 @@ function Library:CreateWindow(config)
     
     local r = 0
     RunService.RenderStepped:Connect(function()
-        r = (r + 1.5) % 360
-        e.Rotation = r
-        e.Color = Themes[CurrentTheme].LoopSeq
-        
-        if waveGrad then
-            waveGrad.Rotation = math.sin(tick() * 0.5) * 10
-            waveGrad.Offset = Vector2.new(math.sin(tick() * 1.2) * 0.5, 0)
-        end
-        
-        local animatedOffset = Vector2.new(math.sin(tick() * 2) * 0.4, 0)
-        for _, grad in pairs(UI_Elements.AnimatedGradients) do
-            if grad and grad.Parent then grad.Offset = animatedOffset end
-        end
-        for _, grad in pairs(UI_Elements.RowStrokeGradients) do
-            if grad and grad.Parent then grad.Offset = animatedOffset end
-        end
-        for _, grad in pairs(UI_Elements.TabGradients) do
-            if grad and grad.Parent then grad.Offset = animatedOffset end
-        end
+        pcall(function()
+            r = (r + 1.5) % 360
+            e.Rotation = r
+            e.Color = Themes[CurrentTheme].LoopSeq
+            
+            if waveGrad then
+                waveGrad.Rotation = math.sin(tick() * 0.5) * 10
+                waveGrad.Offset = Vector2.new(math.sin(tick() * 1.2) * 0.5, 0)
+            end
+            
+            local animatedOffset = Vector2.new(math.sin(tick() * 2) * 0.4, 0)
+            for _, grad in pairs(UI_Elements.AnimatedGradients) do
+                if grad and grad.Parent then grad.Offset = animatedOffset end
+            end
+            for _, grad in pairs(UI_Elements.RowStrokeGradients) do
+                if grad and grad.Parent then grad.Offset = animatedOffset end
+            end
+            for _, grad in pairs(UI_Elements.TabGradients) do
+                if grad and grad.Parent then grad.Offset = animatedOffset end
+            end
+        end)
     end)
     
     Tween(m, {Size = UDim2.new(0, 700, 0, 500)}, 0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
